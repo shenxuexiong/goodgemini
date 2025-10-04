@@ -2,8 +2,8 @@ import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
 import { getConfig, debugLog } from './config';
 
-// 修改为使用固定API Key - 2024-10-04
-// 固定Key: AIzaSyB6y9QsCHI2i26dE_yGJ9S6Sh-834jb7Sg
+// 修改为使用环境变量API Key - 2024-10-04
+// 使用 GOOGLE_API_KEY 环境变量
 
 class HttpError extends Error {
 	status: number;
@@ -54,13 +54,13 @@ export class LoadBalancer extends DurableObject {
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
 		this.env = env;
-		// 使用固定API Key，不需要数据库和轮询
-		debugLog('basic', '使用固定API Key模式，跳过数据库初始化和轮询设置');
+		// 使用环境变量API Key，不需要数据库和轮询
+		debugLog('basic', '使用环境变量API Key模式，跳过数据库初始化和轮询设置');
 	}
 
 	async alarm() {
-		// 轮询已禁用 - 使用固定API Key，无需检查key状态
-		debugLog('basic', '轮询已禁用，使用固定API Key');
+		// 轮询已禁用 - 使用环境变量API Key，无需检查key状态
+		debugLog('basic', '轮询已禁用，使用环境变量API Key');
 		// 不再设置新的alarm
 	}
 
@@ -151,7 +151,7 @@ export class LoadBalancer extends DurableObject {
 		});
 	}
 
-	// 使用固定API Key，不进行负载均衡
+	// 使用环境变量API Key，不进行负载均衡
 	private async forwardRequestWithLoadBalancing(targetUrl: string, request: Request): Promise<Response> {
 		try {
 			let headers = new Headers();
@@ -162,14 +162,21 @@ export class LoadBalancer extends DurableObject {
 				headers.set('content-type', request.headers.get('content-type')!);
 			}
 
-			// 使用固定的API Key
-			const fixedApiKey = 'AIzaSyB6y9QsCHI2i26dE_yGJ9S6Sh-834jb7Sg';
+			// 使用环境变量中的API Key
+			const apiKey = this.env.GOOGLE_API_KEY;
 			
-			headers.set('x-goog-api-key', fixedApiKey);
-			url.searchParams.set('key', fixedApiKey);
+			if (!apiKey) {
+				return new Response('GOOGLE_API_KEY environment variable not configured', { 
+					status: 500,
+					headers: { 'Content-Type': 'text/plain' }
+				});
+			}
 			
-			debugLog('basic', `使用固定 API Key`);
-			return this.forwardRequest(url.toString(), request, headers, fixedApiKey);
+			headers.set('x-goog-api-key', apiKey);
+			url.searchParams.set('key', apiKey);
+			
+			debugLog('basic', `使用环境变量 GOOGLE_API_KEY`);
+			return this.forwardRequest(url.toString(), request, headers, apiKey);
 		} catch (error) {
 			console.error('Failed to fetch:', error);
 			return new Response('Internal Server Error\n' + error, {
