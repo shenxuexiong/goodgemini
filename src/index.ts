@@ -5,7 +5,7 @@ import { getAuthKey } from './auth';
 import { getCookie, setCookie } from 'hono/cookie';
 
 const app = new Hono<{ Bindings: Env }>();
-
+//触发部署！！！！！！新版本2024
 // 管理页面访问，校验 HOME_ACCESS_KEY
 app.get('/', (c) => {
 	const sessionKey = getCookie(c, 'auth-key');
