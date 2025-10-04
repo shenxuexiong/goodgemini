@@ -43,20 +43,53 @@ export const PRODUCTION_CONFIG: DebugConfig = {
     proxyUrl: ''
 };
 
-// 获取当前配置
-export function getConfig(): DebugConfig {
+// 获取当前配置 - 支持环境变量覆盖
+export function getConfig(env?: any): DebugConfig {
     // 检查是否在 Cloudflare Workers 环境中运行
     const isCloudflareWorkers = typeof globalThis !== 'undefined' && 
                                (globalThis as any).navigator?.userAgent?.includes('Cloudflare-Workers');
     
-    // 如果在 Cloudflare Workers 中运行，使用生产配置（直连 Google）
-    // 如果在本地运行，使用开发配置（通过代理）
-    return isCloudflareWorkers ? PRODUCTION_CONFIG : DEFAULT_CONFIG;
+    // 基础配置
+    const baseConfig = isCloudflareWorkers ? PRODUCTION_CONFIG : DEFAULT_CONFIG;
+    
+    // 如果没有env参数，返回基础配置
+    if (!env) {
+        return baseConfig;
+    }
+    
+    // 从环境变量中读取缓冲配置，如果没有设置则使用默认值
+    const bufferMaxChars = env.BUFFER_MAX_CHARS ? parseInt(env.BUFFER_MAX_CHARS, 10) : baseConfig.buffer.maxChars;
+    const bufferMaxChunks = env.BUFFER_MAX_CHUNKS ? parseInt(env.BUFFER_MAX_CHUNKS, 10) : baseConfig.buffer.maxChunks;
+    const bufferTimeoutMs = env.BUFFER_TIMEOUT_MS ? parseInt(env.BUFFER_TIMEOUT_MS, 10) : baseConfig.buffer.timeoutMs;
+    
+    // 返回合并后的配置
+    return {
+        ...baseConfig,
+        buffer: {
+            ...baseConfig.buffer,
+            maxChars: bufferMaxChars,
+            maxChunks: bufferMaxChunks,
+            timeoutMs: bufferTimeoutMs,
+        }
+    };
 }
 
 // 日志工具
 export function debugLog(level: 'basic' | 'verbose', message: string, ...args: any[]) {
     const config = getConfig();
+    
+    if (!config.isDebug) return;
+    
+    if (config.logLevel === 'none') return;
+    if (config.logLevel === 'basic' && level === 'verbose') return;
+    
+    const timestamp = new Date().toISOString();
+    console.log(`[${timestamp}] [${level.toUpperCase()}] ${message}`, ...args);
+}
+
+// 支持env参数的日志工具
+export function debugLogWithEnv(env: any, level: 'basic' | 'verbose', message: string, ...args: any[]) {
+    const config = getConfig(env);
     
     if (!config.isDebug) return;
     

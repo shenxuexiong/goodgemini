@@ -1,10 +1,13 @@
 import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
-import { getConfig, debugLog } from './config';
+import { getConfig, debugLog, debugLogWithEnv } from './config';
+import { Env } from 'hono';
+import { Env } from 'hono';
 
 // 修改为使用环境变量API Key - 2024-10-04
 // 使用 GOOGLE_API_KEY 环境变量
-// 启用生产环境缓冲打包功能 - 2000字符阈值
+// 启用生产环境缓冲打包功能 - 支持环境变量配置
+// 环境变量: BUFFER_MAX_CHARS, BUFFER_MAX_CHUNKS, BUFFER_TIMEOUT_MS
 
 class HttpError extends Error {
 	status: number;
@@ -29,11 +32,15 @@ const API_VERSION = 'v1beta';
 const API_CLIENT = 'genai-js/0.21.0';
 
 // 获取配置并确定使用的 API 地址
-function getApiBaseUrl(): string {
-    const config = getConfig();
-    const baseUrl = config.useProxy ? config.proxyUrl : GOOGLE_API;
-    debugLog('basic', `使用 API 地址: ${baseUrl} (代理模式: ${config.useProxy})`);
-    return baseUrl;
+function getApiBaseUrl(env?: any): string {
+	const config = getConfig(env);
+	const baseUrl = config.useProxy ? config.proxyUrl : GOOGLE_API;
+	if (env) {
+		debugLogWithEnv(env, 'basic', `使用 API 地址: ${baseUrl} (代理模式: ${config.useProxy})`);
+	} else {
+		debugLog('basic', `使用 API 地址: ${baseUrl} (代理模式: ${config.useProxy})`);
+	}
+	return baseUrl;
 }
 
 const makeHeaders = (apiKey: string, more?: Record<string, string>) => ({
@@ -56,12 +63,12 @@ export class LoadBalancer extends DurableObject {
 		super(ctx, env);
 		this.env = env;
 		// 使用环境变量API Key，不需要数据库和轮询
-		debugLog('basic', '使用环境变量API Key模式，跳过数据库初始化和轮询设置');
+		debugLogWithEnv(this.env, 'basic', '使用环境变量API Key模式，跳过数据库初始化和轮询设置');
 	}
 
 	async alarm() {
 		// 轮询已禁用 - 使用环境变量API Key，无需检查key状态
-		debugLog('basic', '轮询已禁用，使用环境变量API Key');
+		debugLogWithEnv(this.env, 'basic', '轮询已禁用，使用环境变量API Key');
 		// 不再设置新的alarm
 	}
 
@@ -115,10 +122,10 @@ export class LoadBalancer extends DurableObject {
 		}
 
 		// Direct Gemini proxy - 去除 API Key 验证，直接转发
-		let targetUrl = `${getApiBaseUrl()}${pathname}${search}`;
-		
-		debugLog('basic', `API 请求转发: ${pathname} -> ${targetUrl}`);
-		
+		let targetUrl = `${getApiBaseUrl(this.env)}${pathname}${search}`;
+
+		debugLogWithEnv(this.env, 'basic', `API 请求转发: ${pathname} -> ${targetUrl}`);
+
 		// 直接转发请求，不进行 API Key 验证
 		return this.forwardRequestWithLoadBalancing(targetUrl, request);
 	}
@@ -165,18 +172,18 @@ export class LoadBalancer extends DurableObject {
 
 			// 使用环境变量中的API Key
 			const apiKey = this.env.GOOGLE_API_KEY;
-			
+
 			if (!apiKey) {
-				return new Response('GOOGLE_API_KEY environment variable not configured', { 
+				return new Response('GOOGLE_API_KEY environment variable not configured', {
 					status: 500,
 					headers: { 'Content-Type': 'text/plain' }
 				});
 			}
-			
+
 			headers.set('x-goog-api-key', apiKey);
 			url.searchParams.set('key', apiKey);
-			
-			debugLog('basic', `使用环境变量 GOOGLE_API_KEY`);
+
+			debugLogWithEnv(this.env, 'basic', `使用环境变量 GOOGLE_API_KEY`);
 			return this.forwardRequest(url.toString(), request, headers, apiKey);
 		} catch (error) {
 			console.error('Failed to fetch:', error);
@@ -188,7 +195,7 @@ export class LoadBalancer extends DurableObject {
 	}
 
 	async handleModels(apiKey: string) {
-		const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models`, {
+		const response = await fetch(`${getApiBaseUrl(this.env)}/${API_VERSION}/models`, {
 			headers: makeHeaders(apiKey),
 		});
 
@@ -233,7 +240,7 @@ export class LoadBalancer extends DurableObject {
 			req.input = [req.input];
 		}
 
-		const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/${model}:batchEmbedContents`, {
+		const response = await fetch(`${getApiBaseUrl(this.env)}/${API_VERSION}/${model}:batchEmbedContents`, {
 			method: 'POST',
 			headers: makeHeaders(apiKey, { 'Content-Type': 'application/json' }),
 			body: JSON.stringify({
@@ -306,7 +313,7 @@ export class LoadBalancer extends DurableObject {
 		}
 
 		const TASK = req.stream ? 'streamGenerateContent' : 'generateContent';
-		let url = `${getApiBaseUrl()}/${API_VERSION}/models/${model}:${TASK}`;
+		let url = `${getApiBaseUrl(this.env)}/${API_VERSION}/models/${model}:${TASK}`;
 		if (req.stream) {
 			url += '?alt=sse';
 		}
@@ -448,44 +455,44 @@ export class LoadBalancer extends DurableObject {
 		return cfg;
 	}
 
-private async transformMessages(messages: any[]) {
-	if (!messages) {
-		return {};
-	}
-
-	const contents: any[] = [];
-	let system_instruction;
-
-	for (const item of messages) {
-		switch (item.role) {
-			case 'system':
-				system_instruction = { parts: await this.transformMsg(item) };
-				continue;
-			case 'assistant':
-				item.role = 'model';
-				break;
-			case 'user':
-				break;
-			default:
-				throw new HttpError(`Unknown message role: "${item.role}"`, 400);
+	private async transformMessages(messages: any[]) {
+		if (!messages) {
+			return {};
 		}
 
-		if (system_instruction) {
-			// 修复：确保 parts 是数组后再调用 some 方法
-			if (!contents[0]?.parts || 
-				(Array.isArray(contents[0]?.parts) && !contents[0]?.parts.some((part: any) => part.text))) {
-				contents.unshift({ role: 'user', parts: [{ text: ' ' }] });
+		const contents: any[] = [];
+		let system_instruction;
+
+		for (const item of messages) {
+			switch (item.role) {
+				case 'system':
+					system_instruction = { parts: await this.transformMsg(item) };
+					continue;
+				case 'assistant':
+					item.role = 'model';
+					break;
+				case 'user':
+					break;
+				default:
+					throw new HttpError(`Unknown message role: "${item.role}"`, 400);
 			}
+
+			if (system_instruction) {
+				// 修复：确保 parts 是数组后再调用 some 方法
+				if (!contents[0]?.parts ||
+					(Array.isArray(contents[0]?.parts) && !contents[0]?.parts.some((part: any) => part.text))) {
+					contents.unshift({ role: 'user', parts: [{ text: ' ' }] });
+				}
+			}
+
+			contents.push({
+				role: item.role,
+				parts: await this.transformMsg(item),
+			});
 		}
 
-		contents.push({
-			role: item.role,
-			parts: await this.transformMsg(item),
-		});
+		return { system_instruction, contents };
 	}
-
-	return { system_instruction, contents };
-}
 
 	private async transformMsg({ content }: any) {
 		const parts = [];
@@ -720,8 +727,8 @@ private async transformMessages(messages: any[]) {
 					],
 				};
 
-				const config = getConfig();
-				
+				const config = getConfig(this.env);
+
 				// 缓冲模式下的打包逻辑 - 生产环境也启用
 				if (config.buffer.enabled) {
 					// 初始化缓冲区
@@ -735,7 +742,7 @@ private async transformMessages(messages: any[]) {
 					this.buffer += delta;
 					this.bufferChunks.push(chunkData);
 
-					const shouldFlush = 
+					const shouldFlush =
 						this.buffer.length >= config.buffer.maxChars ||  // 字符数达到阈值
 						this.bufferChunks.length >= config.buffer.maxChunks ||  // 块数达到阈值
 						(Date.now() - this.bufferStartTime) >= config.buffer.timeoutMs ||  // 超时
@@ -743,8 +750,8 @@ private async transformMessages(messages: any[]) {
 
 					// 当满足打包条件时，发送打包数据
 					if (shouldFlush) {
-						debugLog('basic', `打包发送 ${this.bufferChunks.length} 个数据块，总字符数: ${this.buffer.length}`);
-						
+						console.log(`[BUFFER] 打包发送 ${this.bufferChunks.length} 个数据块，总字符数: ${this.buffer.length}`);
+
 						// 创建打包的响应
 						const batchObj = {
 							id: this.id,
@@ -764,7 +771,7 @@ private async transformMessages(messages: any[]) {
 						};
 
 						controller.enqueue(`data: ${JSON.stringify(batchObj)}\n\n`);
-						
+
 						// 清空缓冲区
 						this.buffer = '';
 						this.bufferChunks = [];
@@ -779,12 +786,12 @@ private async transformMessages(messages: any[]) {
 	}
 
 	private toOpenAiStreamFlush(this: any, controller: any) {
-		const config = getConfig();
-		
+		const config = getConfig(this.env);
+
 		// 缓冲模式下，如果还有未发送的缓冲数据，先发送
 		if (config.buffer.enabled && this.buffer && this.buffer.length > 0) {
-			debugLog('basic', `流结束时发送剩余缓冲数据，字符数: ${this.buffer.length}`);
-			
+			console.log(`[BUFFER] 流结束时发送剩余缓冲数据，字符数: ${this.buffer.length}`);
+
 			const finalBatchObj = {
 				id: this.id,
 				object: 'chat.completion.batch',
@@ -900,7 +907,7 @@ private async transformMessages(messages: any[]) {
 			const checkResults = await Promise.all(
 				keys.map(async (key) => {
 					try {
-						const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${key}`, {
+						const response = await fetch(`${getApiBaseUrl(this.env)}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${key}`, {
 							method: 'POST',
 							headers: {
 								'Content-Type': 'application/json',
@@ -956,12 +963,12 @@ private async transformMessages(messages: any[]) {
 				.raw<any>();
 			const keys = results
 				? Array.from(results).map((row: any) => ({
-						api_key: row[0],
-						status: row[1],
-						key_group: row[2],
-						last_checked_at: row[3],
-						failed_count: row[4],
-				  }))
+					api_key: row[0],
+					status: row[1],
+					key_group: row[2],
+					last_checked_at: row[3],
+					failed_count: row[4],
+				}))
 				: [];
 
 			return new Response(JSON.stringify({ keys, total }), {

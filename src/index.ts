@@ -54,6 +54,10 @@ type Env = {
 	HOME_ACCESS_KEY: string;
 	FORWARD_CLIENT_KEY_ENABLED: string;
 	GOOGLE_API_KEY?: string;
+	// 缓冲配置环境变量
+	BUFFER_MAX_CHARS?: string;     // 最大缓冲字符数，默认2000
+	BUFFER_MAX_CHUNKS?: string;    // 最大缓冲块数，默认100
+	BUFFER_TIMEOUT_MS?: string;    // 缓冲超时时间(毫秒)，默认3000
 };
 
 export default {
