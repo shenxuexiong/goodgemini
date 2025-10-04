@@ -34,10 +34,10 @@ export const PRODUCTION_CONFIG: DebugConfig = {
     isDebug: false,
     logLevel: 'basic',         // 保留基本日志
     buffer: {
-        enabled: true,         // 生产环境也启用缓冲！
+        enabled: true,         // 生产环境启用缓冲打包功能
         maxChars: 2000,        // 2000字符触发打包
-        maxChunks: 50,         // 最多50个块打包
-        timeoutMs: 5000        // 5秒超时
+        maxChunks: 100,        // 最多100个块打包
+        timeoutMs: 3000        // 3秒超时
     },
     useProxy: false,           // 生产环境直连 Google API
     proxyUrl: ''

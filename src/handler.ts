@@ -4,6 +4,7 @@ import { getConfig, debugLog } from './config';
 
 // 修改为使用环境变量API Key - 2024-10-04
 // 使用 GOOGLE_API_KEY 环境变量
+// 启用生产环境缓冲打包功能 - 2000字符阈值
 
 class HttpError extends Error {
 	status: number;
@@ -721,8 +722,8 @@ private async transformMessages(messages: any[]) {
 
 				const config = getConfig();
 				
-				// 缓冲模式下的打包逻辑
-				if (config.isDebug && config.buffer.enabled) {
+				// 缓冲模式下的打包逻辑 - 生产环境也启用
+				if (config.buffer.enabled) {
 					// 初始化缓冲区
 					if (!this.buffer) {
 						this.buffer = '';
@@ -781,7 +782,7 @@ private async transformMessages(messages: any[]) {
 		const config = getConfig();
 		
 		// 缓冲模式下，如果还有未发送的缓冲数据，先发送
-		if (config.isDebug && config.buffer.enabled && this.buffer && this.buffer.length > 0) {
+		if (config.buffer.enabled && this.buffer && this.buffer.length > 0) {
 			debugLog('basic', `流结束时发送剩余缓冲数据，字符数: ${this.buffer.length}`);
 			
 			const finalBatchObj = {
