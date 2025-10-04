@@ -29,9 +29,10 @@
 
 1.  **克隆项目**
     ```bash
-    git clone https://github.com/zaunist/gemini-balance-do.git
-    cd gemini-balance-do
+    git clone https://github.com/YOUR-USERNAME/YOUR-REPO-NAME.git
+    cd YOUR-REPO-NAME
     ```
+    > 注意：请将 `YOUR-USERNAME` 和 `YOUR-REPO-NAME` 替换为你的GitHub用户名和仓库名
 
 2.  **安装依赖**
     ```bash
@@ -60,7 +61,15 @@
     *   点击 `创建应用程序` -> `连接到 Git`。
     *   选择你刚刚 Fork 的仓库。
     *   在“构建和部署”设置中，Cloudflare 通常会自动检测到这是一个 Worker 项目，无需额外配置。
+4.  **配置环境变量**（重要）:
+    *   在部署设置中，找到"环境变量"部分
+    *   添加以下必需的环境变量：
+        - `HOME_ACCESS_KEY`: 设置一个强密码作为管理面板访问密钥
+        - `AUTH_KEY`: 设置API请求认证密钥  
+        - `FORWARD_CLIENT_KEY_ENABLED`: 设置为 `false`（除非你只想用作代理）
     *   点击 `保存并部署`。
+
+5.  **记录部署URL**: 部署成功后，记录你的Worker URL。
 
 ## 🔑 API 密钥管理
 
@@ -76,9 +85,9 @@
 
 `FORWARD_CLIENT_KEY_ENABLED` : 默认为 false，设置为 true 时，会透传客户端的 key，此时仅作为 Gemini API 代理，没有多 key 负载均衡功能。
 
-`AUTH_KEY` ： 默认为：`ajielu`，本项目API请求密钥，如果 `FORWARD_CLIENT_KEY_ENABLED` 为 true，那么本项目仅作为一个 Gemini API 代理，无需认证
+`AUTH_KEY` ： 本项目API请求密钥，需要在部署时设置，如果 `FORWARD_CLIENT_KEY_ENABLED` 为 true，那么本项目仅作为一个 Gemini API 代理，无需认证
 
-`HOME_ACCESS_KEY`：网页管理面板密码，默认为 `7b18e536c27ab304266db3220b8e000db8fbbe35d6e1fde729a1a1d47303858d`
+`HOME_ACCESS_KEY`：网页管理面板密码，需要在部署时设置
 
 **强烈建议你在Cloudflare Worker环境变量中修改 `HOME_ACCESS_KEY` 和 `AUTH_KEY` 的值，修改完成后重新部署即可。**
 

@@ -4,7 +4,7 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "gemini-balance-do",
+	"name": "your-worker-name",
 	"main": "src/index.ts",
 	"compatibility_date": "2025-08-05",
 	"keep_vars": true,//部署时保留 Cloudflare 控制台中设置的变量值，不被 vars 字段覆盖
@@ -26,9 +26,9 @@
 		"enabled": true
 	},
 	"vars": {
-		"AUTH_KEY": "ajielu",
-		"HOME_ACCESS_KEY": "7b18e536c27ab304266db3220b8e000db8fbbe35d6e1fde729a1a1d47303858d",
-		"FORWARD_CLIENT_KEY_ENABLED": false
+		"HOME_ACCESS_KEY": "your-home-access-key-here",
+		"FORWARD_CLIENT_KEY_ENABLED": true,
+		"GOOGLE_API_KEY": "your-real-google-api-key-here"
 	}
 	/**
 	 * Smart Placement

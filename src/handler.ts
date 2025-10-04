@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
+import { getConfig, debugLog } from './config';
 
 class HttpError extends Error {
 	status: number;
@@ -18,9 +19,18 @@ const fixCors = ({ headers, status, statusText }: { headers?: HeadersInit; statu
 	return { headers: newHeaders, status, statusText };
 };
 
-const BASE_URL = 'https://generativelanguage.googleapis.com';
+// 配置 API 地址
+const GOOGLE_API = 'https://generativelanguage.googleapis.com';  // 原始 Google API
 const API_VERSION = 'v1beta';
 const API_CLIENT = 'genai-js/0.21.0';
+
+// 获取配置并确定使用的 API 地址
+function getApiBaseUrl(): string {
+    const config = getConfig();
+    const baseUrl = config.useProxy ? config.proxyUrl : GOOGLE_API;
+    debugLog('basic', `使用 API 地址: ${baseUrl} (代理模式: ${config.useProxy})`);
+    return baseUrl;
+}
 
 const makeHeaders = (apiKey: string, more?: Record<string, string>) => ({
 	'x-goog-api-client': API_CLIENT,
@@ -69,7 +79,7 @@ export class LoadBalancer extends DurableObject {
 			const failedCount = row[1] as number;
 
 			try {
-				const response = await fetch(`${BASE_URL}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+				const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
@@ -117,7 +127,7 @@ export class LoadBalancer extends DurableObject {
 		for (const row of Array.from(normalKeys)) {
 			const apiKey = row[0] as string;
 			try {
-				const response = await fetch(`${BASE_URL}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+				const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
 					method: 'POST',
 					headers: {
 						'Content-Type': 'application/json',
@@ -195,37 +205,12 @@ export class LoadBalancer extends DurableObject {
 			return this.handleOpenAI(request);
 		}
 
-		// Direct Gemini proxy
-		const authKey = this.env.AUTH_KEY;
-
-		let targetUrl = `${BASE_URL}${pathname}${search}`;
-
-		if (this.env.FORWARD_CLIENT_KEY_ENABLED) {
-			return this.forwardRequestWithLoadBalancing(targetUrl, request);
-		}
-
-		if (authKey) {
-			let isAuthorized = false;
-			// Check key in query parameters
-			if (search.includes('key=')) {
-				const urlObj = new URL(targetUrl);
-				const requestKey = urlObj.searchParams.get('key');
-				if (requestKey && requestKey === authKey) {
-					isAuthorized = true;
-				}
-			} else {
-				// Check x-goog-api-key in headers
-				const requestKey = request.headers.get('x-goog-api-key');
-				if (requestKey && requestKey === authKey) {
-					isAuthorized = true;
-				}
-			}
-
-			if (!isAuthorized) {
-				return new Response('Unauthorized', { status: 401, headers: fixCors({}).headers });
-			}
-		}
-		// If authKey is not set, or if it was authorized, proceed to forward with load balancing.
+		// Direct Gemini proxy - 去除 API Key 验证，直接转发
+		let targetUrl = `${getApiBaseUrl()}${pathname}${search}`;
+		
+		debugLog('basic', `API 请求转发: ${pathname} -> ${targetUrl}`);
+		
+		// 直接转发请求，不进行 API Key 验证
 		return this.forwardRequestWithLoadBalancing(targetUrl, request);
 	}
 
@@ -275,7 +260,22 @@ export class LoadBalancer extends DurableObject {
 			}
 
 			if (this.env.FORWARD_CLIENT_KEY_ENABLED) {
-				return this.forwardRequest(url.toString(), request, headers, ''); // No specific key for forwarded client key
+				// 转发客户端提供的 API Key，如果没有则使用环境变量中的 Google API Key
+				let apiKey = request.headers.get('x-goog-api-key') || url.searchParams.get('key') || '';
+				
+				// 如果客户端没有提供 API Key，使用环境变量中的 Google API Key
+				if (!apiKey && this.env.GOOGLE_API_KEY) {
+					apiKey = this.env.GOOGLE_API_KEY;
+					debugLog('basic', `使用环境变量 Google API Key`);
+				}
+				
+				if (apiKey) {
+					headers.set('x-goog-api-key', apiKey);
+					url.searchParams.set('key', apiKey);
+				}
+				
+				debugLog('basic', `使用 API Key: ${apiKey ? '已设置' : '未设置'}`);
+				return this.forwardRequest(url.toString(), request, headers, apiKey);
 			}
 			const apiKey = await this.getRandomApiKey();
 			if (!apiKey) {
@@ -295,7 +295,7 @@ export class LoadBalancer extends DurableObject {
 	}
 
 	async handleModels(apiKey: string) {
-		const response = await fetch(`${BASE_URL}/${API_VERSION}/models`, {
+		const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models`, {
 			headers: makeHeaders(apiKey),
 		});
 
@@ -340,7 +340,7 @@ export class LoadBalancer extends DurableObject {
 			req.input = [req.input];
 		}
 
-		const response = await fetch(`${BASE_URL}/${API_VERSION}/${model}:batchEmbedContents`, {
+		const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/${model}:batchEmbedContents`, {
 			method: 'POST',
 			headers: makeHeaders(apiKey, { 'Content-Type': 'application/json' }),
 			body: JSON.stringify({
@@ -413,7 +413,7 @@ export class LoadBalancer extends DurableObject {
 		}
 
 		const TASK = req.stream ? 'streamGenerateContent' : 'generateContent';
-		let url = `${BASE_URL}/${API_VERSION}/models/${model}:${TASK}`;
+		let url = `${getApiBaseUrl()}/${API_VERSION}/models/${model}:${TASK}`;
 		if (req.stream) {
 			url += '?alt=sse';
 		}
@@ -826,12 +826,93 @@ private async transformMessages(messages: any[]) {
 						},
 					],
 				};
-				controller.enqueue(`data: ${JSON.stringify(obj)}\n\n`);
+
+				const config = getConfig();
+				
+				// 缓冲模式下的打包逻辑
+				if (config.isDebug && config.buffer.enabled) {
+					// 初始化缓冲区
+					if (!this.buffer) {
+						this.buffer = '';
+						this.bufferChunks = [];
+						this.bufferStartTime = Date.now();
+					}
+
+					const chunkData = `data: ${JSON.stringify(obj)}\n\n`;
+					this.buffer += delta;
+					this.bufferChunks.push(chunkData);
+
+					const shouldFlush = 
+						this.buffer.length >= config.buffer.maxChars ||  // 字符数达到阈值
+						this.bufferChunks.length >= config.buffer.maxChunks ||  // 块数达到阈值
+						(Date.now() - this.bufferStartTime) >= config.buffer.timeoutMs ||  // 超时
+						finishReason;  // 流结束
+
+					// 当满足打包条件时，发送打包数据
+					if (shouldFlush) {
+						debugLog('basic', `打包发送 ${this.bufferChunks.length} 个数据块，总字符数: ${this.buffer.length}`);
+						
+						// 创建打包的响应
+						const batchObj = {
+							id: this.id,
+							object: 'chat.completion.batch',
+							created: Math.floor(Date.now() / 1000),
+							model: this.model,
+							batch_size: this.bufferChunks.length,
+							total_chars: this.buffer.length,
+							buffer_time_ms: Date.now() - this.bufferStartTime,
+							choices: [
+								{
+									index,
+									delta: { content: this.buffer },
+									finish_reason: finishReason ? (reasonsMap[finishReason] || finishReason) : null,
+								},
+							],
+						};
+
+						controller.enqueue(`data: ${JSON.stringify(batchObj)}\n\n`);
+						
+						// 清空缓冲区
+						this.buffer = '';
+						this.bufferChunks = [];
+						this.bufferStartTime = Date.now();
+					}
+				} else {
+					// 生产模式或缓冲禁用，正常发送
+					controller.enqueue(`data: ${JSON.stringify(obj)}\n\n`);
+				}
 			}
 		}
 	}
 
 	private toOpenAiStreamFlush(this: any, controller: any) {
+		const config = getConfig();
+		
+		// 缓冲模式下，如果还有未发送的缓冲数据，先发送
+		if (config.isDebug && config.buffer.enabled && this.buffer && this.buffer.length > 0) {
+			debugLog('basic', `流结束时发送剩余缓冲数据，字符数: ${this.buffer.length}`);
+			
+			const finalBatchObj = {
+				id: this.id,
+				object: 'chat.completion.batch',
+				created: Math.floor(Date.now() / 1000),
+				model: this.model,
+				batch_size: this.bufferChunks ? this.bufferChunks.length : 0,
+				total_chars: this.buffer.length,
+				buffer_time_ms: Date.now() - (this.bufferStartTime || Date.now()),
+				is_final: true,
+				choices: [
+					{
+						index: 0,
+						delta: { content: this.buffer },
+						finish_reason: 'stop',
+					},
+				],
+			};
+
+			controller.enqueue(`data: ${JSON.stringify(finalBatchObj)}\n\n`);
+		}
+
 		if (this.streamIncludeUsage && this.shared.usage) {
 			const obj = {
 				id: this.id,
@@ -926,7 +1007,7 @@ private async transformMessages(messages: any[]) {
 			const checkResults = await Promise.all(
 				keys.map(async (key) => {
 					try {
-						const response = await fetch(`${BASE_URL}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${key}`, {
+						const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${key}`, {
 							method: 'POST',
 							headers: {
 								'Content-Type': 'application/json',

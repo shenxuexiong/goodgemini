@@ -7,9 +7,24 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
-		"cf-typegen": "wrangler types"
+		"cf-typegen": "wrangler types",
+		"deploy:check": "node deploy-check.js",
+		"test:direct": "node test-direct-google.js",
+		"test:allen123": "node test-allen123.js",
+		"test:no-auth": "node test-no-auth.js",
+		"test:auth": "node test-auth.js",
+		"test:proxy": "node test-proxy.js",
+		"test:server": "node test-server.js",
+		"test:wrangler": "node test-wrangler.js",
+		"test:streaming": "node test-streaming.js",
+		"test:simple": "node test-simple.js",
+		"test:buffering": "node test-buffering.js",
+		"check:config": "node check-config.js",
+		"check:status": "node check-status.js",
+		"test:fix": "node test-fix.js"
 	},
 	"devDependencies": {
+		"@cloudflare/workers-types": "^4.20241127.0",
 		"@types/node": "^24.3.1",
 		"typescript": "^5.5.2",
 		"wrangler": "^4.28.0"

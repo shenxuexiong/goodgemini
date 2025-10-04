@@ -14,7 +14,10 @@ app.get('/', (c) => {
 		return c.html(Render({ isAuthenticated: false, showWarning: false }));
 	}
 	const showWarning =
-		c.env.HOME_ACCESS_KEY === '7b18e536c27ab304266db3220b8e000db8fbbe35d6e1fde729a1a1d47303858d' || c.env.AUTH_KEY === 'ajielu';
+		c.env.HOME_ACCESS_KEY === 'your-home-access-key-here' || 
+		c.env.AUTH_KEY === 'your-auth-key-here' ||
+		!c.env.HOME_ACCESS_KEY || 
+		!c.env.AUTH_KEY;
 	return c.html(Render({ isAuthenticated: true, showWarning }));
 });
 
@@ -46,9 +49,10 @@ app.all('*', async (c) => {
 
 type Env = {
 	LOAD_BALANCER: DurableObjectNamespace<LoadBalancer>;
-	AUTH_KEY: string;
+	AUTH_KEY?: string;
 	HOME_ACCESS_KEY: string;
 	FORWARD_CLIENT_KEY_ENABLED: string;
+	GOOGLE_API_KEY?: string;
 };
 
 export default {
