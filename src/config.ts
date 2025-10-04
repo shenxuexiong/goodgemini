@@ -23,7 +23,7 @@ export const DEFAULT_CONFIG: DebugConfig = {
         enabled: true,
         maxChars: 1000,        // 1000字符触发打包
         maxChunks: 1200,       // 最多1200个块打包
-        timeoutMs: 2000        // 2秒超时
+        timeoutMs: 5000        // 5秒超时
     },
     useProxy: true,            // 使用代理服务器
     proxyUrl: 'http://shenxx123.site'  // 你的代理服务器地址
@@ -37,7 +37,7 @@ export const PRODUCTION_CONFIG: DebugConfig = {
         enabled: true,         // 生产环境启用缓冲打包功能
         maxChars: 1000,        // 1000字符触发打包（3000字分3次发送）
         maxChunks: 1200,       // 最多1200个块打包（应对1包1字的情况）
-        timeoutMs: 2000        // 2秒超时（避免等待太久）
+        timeoutMs: 5000        // 5秒超时（减少网络包数量）
     },
     useProxy: false,           // 生产环境直连 Google API
     proxyUrl: ''
