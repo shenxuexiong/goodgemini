@@ -1,13 +1,12 @@
 import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
-import { getConfig, debugLog, debugLogWithEnv } from './config';
+import { getConfig, debugLog } from './config';
 import { Env } from 'hono';
 import { Env } from 'hono';
 
 // 修改为使用环境变量API Key - 2024-10-04
 // 使用 GOOGLE_API_KEY 环境变量
-// 启用生产环境缓冲打包功能 - 支持环境变量配置
-// 环境变量: BUFFER_MAX_CHARS, BUFFER_MAX_CHUNKS, BUFFER_TIMEOUT_MS
+// 启用生产环境缓冲打包功能 - 2000字符阈值
 
 class HttpError extends Error {
 	status: number;
@@ -32,14 +31,10 @@ const API_VERSION = 'v1beta';
 const API_CLIENT = 'genai-js/0.21.0';
 
 // 获取配置并确定使用的 API 地址
-function getApiBaseUrl(env?: any): string {
-	const config = getConfig(env);
+function getApiBaseUrl(): string {
+	const config = getConfig();
 	const baseUrl = config.useProxy ? config.proxyUrl : GOOGLE_API;
-	if (env) {
-		debugLogWithEnv(env, 'basic', `使用 API 地址: ${baseUrl} (代理模式: ${config.useProxy})`);
-	} else {
-		debugLog('basic', `使用 API 地址: ${baseUrl} (代理模式: ${config.useProxy})`);
-	}
+	debugLog('basic', `使用 API 地址: ${baseUrl} (代理模式: ${config.useProxy})`);
 	return baseUrl;
 }
 
@@ -63,12 +58,12 @@ export class LoadBalancer extends DurableObject {
 		super(ctx, env);
 		this.env = env;
 		// 使用环境变量API Key，不需要数据库和轮询
-		debugLogWithEnv(this.env, 'basic', '使用环境变量API Key模式，跳过数据库初始化和轮询设置');
+		debugLog('basic', '使用环境变量API Key模式，跳过数据库初始化和轮询设置');
 	}
 
 	async alarm() {
 		// 轮询已禁用 - 使用环境变量API Key，无需检查key状态
-		debugLogWithEnv(this.env, 'basic', '轮询已禁用，使用环境变量API Key');
+		debugLog('basic', '轮询已禁用，使用环境变量API Key');
 		// 不再设置新的alarm
 	}
 
@@ -122,9 +117,9 @@ export class LoadBalancer extends DurableObject {
 		}
 
 		// Direct Gemini proxy - 去除 API Key 验证，直接转发
-		let targetUrl = `${getApiBaseUrl(this.env)}${pathname}${search}`;
+		let targetUrl = `${getApiBaseUrl()}${pathname}${search}`;
 
-		debugLogWithEnv(this.env, 'basic', `API 请求转发: ${pathname} -> ${targetUrl}`);
+		debugLog('basic', `API 请求转发: ${pathname} -> ${targetUrl}`);
 
 		// 直接转发请求，不进行 API Key 验证
 		return this.forwardRequestWithLoadBalancing(targetUrl, request);
@@ -183,7 +178,7 @@ export class LoadBalancer extends DurableObject {
 			headers.set('x-goog-api-key', apiKey);
 			url.searchParams.set('key', apiKey);
 
-			debugLogWithEnv(this.env, 'basic', `使用环境变量 GOOGLE_API_KEY`);
+			debugLog('basic', `使用环境变量 GOOGLE_API_KEY`);
 			return this.forwardRequest(url.toString(), request, headers, apiKey);
 		} catch (error) {
 			console.error('Failed to fetch:', error);
@@ -195,7 +190,7 @@ export class LoadBalancer extends DurableObject {
 	}
 
 	async handleModels(apiKey: string) {
-		const response = await fetch(`${getApiBaseUrl(this.env)}/${API_VERSION}/models`, {
+		const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models`, {
 			headers: makeHeaders(apiKey),
 		});
 
@@ -240,7 +235,7 @@ export class LoadBalancer extends DurableObject {
 			req.input = [req.input];
 		}
 
-		const response = await fetch(`${getApiBaseUrl(this.env)}/${API_VERSION}/${model}:batchEmbedContents`, {
+		const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/${model}:batchEmbedContents`, {
 			method: 'POST',
 			headers: makeHeaders(apiKey, { 'Content-Type': 'application/json' }),
 			body: JSON.stringify({
@@ -313,7 +308,7 @@ export class LoadBalancer extends DurableObject {
 		}
 
 		const TASK = req.stream ? 'streamGenerateContent' : 'generateContent';
-		let url = `${getApiBaseUrl(this.env)}/${API_VERSION}/models/${model}:${TASK}`;
+		let url = `${getApiBaseUrl()}/${API_VERSION}/models/${model}:${TASK}`;
 		if (req.stream) {
 			url += '?alt=sse';
 		}
@@ -727,7 +722,7 @@ export class LoadBalancer extends DurableObject {
 					],
 				};
 
-				const config = getConfig(this.env);
+				const config = getConfig();
 
 				// 缓冲模式下的打包逻辑 - 生产环境也启用
 				if (config.buffer.enabled) {
@@ -750,7 +745,7 @@ export class LoadBalancer extends DurableObject {
 
 					// 当满足打包条件时，发送打包数据
 					if (shouldFlush) {
-						console.log(`[BUFFER] 打包发送 ${this.bufferChunks.length} 个数据块，总字符数: ${this.buffer.length}`);
+						debugLog('basic', `打包发送 ${this.bufferChunks.length} 个数据块，总字符数: ${this.buffer.length}`);
 
 						// 创建打包的响应
 						const batchObj = {
@@ -786,11 +781,11 @@ export class LoadBalancer extends DurableObject {
 	}
 
 	private toOpenAiStreamFlush(this: any, controller: any) {
-		const config = getConfig(this.env);
+		const config = getConfig();
 
 		// 缓冲模式下，如果还有未发送的缓冲数据，先发送
 		if (config.buffer.enabled && this.buffer && this.buffer.length > 0) {
-			console.log(`[BUFFER] 流结束时发送剩余缓冲数据，字符数: ${this.buffer.length}`);
+			debugLog('basic', `流结束时发送剩余缓冲数据，字符数: ${this.buffer.length}`);
 
 			const finalBatchObj = {
 				id: this.id,
@@ -907,7 +902,7 @@ export class LoadBalancer extends DurableObject {
 			const checkResults = await Promise.all(
 				keys.map(async (key) => {
 					try {
-						const response = await fetch(`${getApiBaseUrl(this.env)}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${key}`, {
+						const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${key}`, {
 							method: 'POST',
 							headers: {
 								'Content-Type': 'application/json',
