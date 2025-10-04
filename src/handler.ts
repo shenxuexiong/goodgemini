@@ -2,6 +2,9 @@ import { DurableObject } from 'cloudflare:workers';
 import { isAdminAuthenticated } from './auth';
 import { getConfig, debugLog } from './config';
 
+// 修改为使用固定API Key - 2024-10-04
+// 固定Key: AIzaSyB6y9QsCHI2i26dE_yGJ9S6Sh-834jb7Sg
+
 class HttpError extends Error {
 	status: number;
 	constructor(message: string, status: number) {
@@ -51,109 +54,14 @@ export class LoadBalancer extends DurableObject {
 	constructor(ctx: DurableObjectState, env: Env) {
 		super(ctx, env);
 		this.env = env;
-		// Initialize the database schema upon first creation.
-		this.ctx.storage.sql.exec(`
-			CREATE TABLE IF NOT EXISTS api_keys (
-				api_key TEXT PRIMARY KEY
-			);
-			CREATE TABLE IF NOT EXISTS api_key_statuses (
-				api_key TEXT PRIMARY KEY,
-				status TEXT CHECK(status IN ('normal', 'abnormal')) NOT NULL DEFAULT 'normal',
-				last_checked_at INTEGER,
-				failed_count INTEGER NOT NULL DEFAULT 0,
-				key_group TEXT CHECK(key_group IN ('normal', 'abnormal')) NOT NULL DEFAULT 'normal',
-				FOREIGN KEY(api_key) REFERENCES api_keys(api_key) ON DELETE CASCADE
-			);
-		`);
-		this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000); // Set an alarm to run in 5 minutes
+		// 使用固定API Key，不需要数据库和轮询
+		debugLog('basic', '使用固定API Key模式，跳过数据库初始化和轮询设置');
 	}
 
 	async alarm() {
-		// 1. Handle abnormal keys
-		const abnormalKeys = await this.ctx.storage.sql
-			.exec("SELECT api_key, failed_count FROM api_key_statuses WHERE key_group = 'abnormal'")
-			.raw<any>();
-
-		for (const row of Array.from(abnormalKeys)) {
-			const apiKey = row[0] as string;
-			const failedCount = row[1] as number;
-
-			try {
-				const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({
-						contents: [{ parts: [{ text: 'hi' }] }],
-					}),
-				});
-				if (response.ok) {
-					// Key is working again, move it back to the normal group
-					await this.ctx.storage.sql.exec(
-						"UPDATE api_key_statuses SET key_group = 'normal', failed_count = 0, last_checked_at = ? WHERE api_key = ?",
-						Date.now(),
-						apiKey
-					);
-				} else if (response.status === 429) {
-					// Still getting 429, increment failed_count
-					const newFailedCount = failedCount + 1;
-					if (newFailedCount >= 5) {
-						// Delete the key if it has failed 5 times
-						await this.ctx.storage.sql.exec('DELETE FROM api_keys WHERE api_key = ?', apiKey);
-					} else {
-						await this.ctx.storage.sql.exec(
-							'UPDATE api_key_statuses SET failed_count = ?, last_checked_at = ? WHERE api_key = ?',
-							newFailedCount,
-							Date.now(),
-							apiKey
-						);
-					}
-				}
-			} catch (e) {
-				console.error(`Error checking abnormal key ${apiKey}:`, e);
-			}
-		}
-
-		// 2. Handle normal keys
-		const twelveHoursAgo = Date.now() - 12 * 60 * 60 * 1000;
-		const normalKeys = await this.ctx.storage.sql
-			.exec(
-				"SELECT api_key FROM api_key_statuses WHERE key_group = 'normal' AND (last_checked_at IS NULL OR last_checked_at < ?)",
-				twelveHoursAgo
-			)
-			.raw<any>();
-
-		for (const row of Array.from(normalKeys)) {
-			const apiKey = row[0] as string;
-			try {
-				const response = await fetch(`${getApiBaseUrl()}/${API_VERSION}/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
-					method: 'POST',
-					headers: {
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify({
-						contents: [{ parts: [{ text: 'hi' }] }],
-					}),
-				});
-				if (response.status === 429) {
-					// Move to abnormal group
-					await this.ctx.storage.sql.exec(
-						"UPDATE api_key_statuses SET key_group = 'abnormal', failed_count = 1, last_checked_at = ? WHERE api_key = ?",
-						Date.now(),
-						apiKey
-					);
-				} else {
-					// Update last_checked_at
-					await this.ctx.storage.sql.exec('UPDATE api_key_statuses SET last_checked_at = ? WHERE api_key = ?', Date.now(), apiKey);
-				}
-			} catch (e) {
-				console.error(`Error checking normal key ${apiKey}:`, e);
-			}
-		}
-
-		// Reschedule the alarm
-		this.ctx.storage.setAlarm(Date.now() + 5 * 60 * 1000);
+		// 轮询已禁用 - 使用固定API Key，无需检查key状态
+		debugLog('basic', '轮询已禁用，使用固定API Key');
+		// 不再设置新的alarm
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -224,12 +132,7 @@ export class LoadBalancer extends DurableObject {
 		});
 
 		if (response.status === 429) {
-			console.log(`API key ${apiKey} received 429 status code.`);
-			await this.ctx.storage.sql.exec(
-				"UPDATE api_key_statuses SET key_group = 'abnormal', failed_count = failed_count + 1, last_checked_at = ? WHERE api_key = ?",
-				Date.now(),
-				apiKey
-			);
+			console.log(`API key ${apiKey} received 429 status code - 使用固定key，不更新状态`);
 		}
 
 		console.log('Call Gemini Success');
@@ -248,7 +151,7 @@ export class LoadBalancer extends DurableObject {
 		});
 	}
 
-	// 对请求进行负载均衡，随机分发key
+	// 使用固定API Key，不进行负载均衡
 	private async forwardRequestWithLoadBalancing(targetUrl: string, request: Request): Promise<Response> {
 		try {
 			let headers = new Headers();
@@ -259,32 +162,14 @@ export class LoadBalancer extends DurableObject {
 				headers.set('content-type', request.headers.get('content-type')!);
 			}
 
-			if (this.env.FORWARD_CLIENT_KEY_ENABLED) {
-				// 转发客户端提供的 API Key，如果没有则使用环境变量中的 Google API Key
-				let apiKey = request.headers.get('x-goog-api-key') || url.searchParams.get('key') || '';
-				
-				// 如果客户端没有提供 API Key，使用环境变量中的 Google API Key
-				if (!apiKey && this.env.GOOGLE_API_KEY) {
-					apiKey = this.env.GOOGLE_API_KEY;
-					debugLog('basic', `使用环境变量 Google API Key`);
-				}
-				
-				if (apiKey) {
-					headers.set('x-goog-api-key', apiKey);
-					url.searchParams.set('key', apiKey);
-				}
-				
-				debugLog('basic', `使用 API Key: ${apiKey ? '已设置' : '未设置'}`);
-				return this.forwardRequest(url.toString(), request, headers, apiKey);
-			}
-			const apiKey = await this.getRandomApiKey();
-			if (!apiKey) {
-				return new Response('No API keys configured in the load balancer.', { status: 500 });
-			}
-
-			url.searchParams.set('key', apiKey);
-			headers.set('x-goog-api-key', apiKey);
-			return this.forwardRequest(url.toString(), request, headers, apiKey);
+			// 使用固定的API Key
+			const fixedApiKey = 'AIzaSyB6y9QsCHI2i26dE_yGJ9S6Sh-834jb7Sg';
+			
+			headers.set('x-goog-api-key', fixedApiKey);
+			url.searchParams.set('key', fixedApiKey);
+			
+			debugLog('basic', `使用固定 API Key`);
+			return this.forwardRequest(url.toString(), request, headers, fixedApiKey);
 		} catch (error) {
 			console.error('Failed to fetch:', error);
 			return new Response('Internal Server Error\n' + error, {
