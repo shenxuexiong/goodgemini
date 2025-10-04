@@ -6,6 +6,7 @@ import { getCookie, setCookie } from 'hono/cookie';
 
 const app = new Hono<{ Bindings: Env }>();
 //触发部署！！！！！！新版本2024
+// 重新部署以应用Cloudflare全局变量配置 - 2024年10月
 // 管理页面访问，校验 HOME_ACCESS_KEY
 app.get('/', (c) => {
 	const sessionKey = getCookie(c, 'auth-key');
@@ -14,9 +15,9 @@ app.get('/', (c) => {
 		return c.html(Render({ isAuthenticated: false, showWarning: false }));
 	}
 	const showWarning =
-		c.env.HOME_ACCESS_KEY === 'your-home-access-key-here' || 
+		c.env.HOME_ACCESS_KEY === 'your-home-access-key-here' ||
 		c.env.AUTH_KEY === 'your-auth-key-here' ||
-		!c.env.HOME_ACCESS_KEY || 
+		!c.env.HOME_ACCESS_KEY ||
 		!c.env.AUTH_KEY;
 	return c.html(Render({ isAuthenticated: true, showWarning }));
 });
@@ -60,3 +61,5 @@ export default {
 };
 
 export { LoadBalancer };
+
+// 部署时间戳: 2024-10-04 - 应用新的环境变量配置
